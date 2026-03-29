@@ -1,8 +1,18 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f2efe7;
+  --foreground: #10241b;
+  --muted: #5b6d63;
+  --surface: rgba(255, 255, 255, 0.78);
+  --surface-strong: #faf8f2;
+  --line: rgba(16, 36, 27, 0.12);
+  --accent: #1f6b4f;
+  --accent-deep: #123b2d;
+  --accent-soft: #d9ecde;
+  --chart-minimum: #8d9c94;
+  --chart-extra: #4a8a6f;
+  --chart-smart: #123b2d;
 }
 
 @theme inline {
@@ -10,17 +20,103 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-fraunces);
+  --font-brand: var(--font-syne);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  background: var(--background);
+  scroll-behavior: smooth;
 }
 
 body {
+  position: relative;
+  min-height: 100vh;
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  background-image:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 28%),
+    radial-gradient(circle at top right, rgba(31, 107, 79, 0.16), transparent 22%),
+    linear-gradient(180deg, #f7f4ee 0%, #f1ede4 42%, #ece7dc 100%);
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: -1;
+  background-image:
+    radial-gradient(circle at 18% 18%, rgba(217, 236, 222, 0.68), transparent 26%),
+    radial-gradient(circle at 82% 12%, rgba(31, 107, 79, 0.14), transparent 18%);
+}
+
+::selection {
+  background: rgba(31, 107, 79, 0.22);
+  color: var(--foreground);
+}
+
+.fade-in-up {
+  animation: fade-in-up 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.delay-1 {
+  animation-delay: 0.08s;
+}
+
+.delay-2 {
+  animation-delay: 0.18s;
+}
+
+.delay-3 {
+  animation-delay: 0.28s;
+}
+
+.delay-4 {
+  animation-delay: 0.38s;
+}
+
+.hero-float {
+  animation: hero-float 6.8s ease-in-out infinite;
+}
+
+.hero-float-slow {
+  animation-duration: 8.4s;
+}
+
+.hero-float-fast {
+  animation-duration: 5.6s;
+}
+
+@keyframes fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes hero-float {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+
+  50% {
+    transform: translateY(-10px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fade-in-up,
+  .hero-float,
+  .hero-float-slow,
+  .hero-float-fast {
+    animation: none;
+  }
 }
