@@ -674,7 +674,7 @@ export default function AddLoanPage() {
                 <p className={errorClass}>{visibleErrors.form}</p>
               ) : null}
 
-              <div className="flex flex-col gap-4 border-t border-[color:var(--line)] pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-col gap-4 pt-5 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm leading-6 text-[color:var(--muted)]">
                   Lonnex will use this to validate the loan and start building
                   your repayment plan.
