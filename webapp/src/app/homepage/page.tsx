@@ -4,10 +4,13 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { formatAmount } from "@/lib/currency";
 
 type Loan = {
   id: string;
   loan_name: string;
+  balance: number;
+  min_payment: number;
 };
 
 export default function Homepage() {
@@ -16,6 +19,7 @@ export default function Homepage() {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const [username, setUsername] = useState("Member");
   const [loans, setLoans] = useState<Loan[]>([]);
+  const [userCurrency, setUserCurrency] = useState("USD");
   const [authResolved, setAuthResolved] = useState(false);
 
   useEffect(() => {
@@ -56,9 +60,16 @@ export default function Homepage() {
         error: profileError,
       });
 
+      const { data: financialProfile, error: financialProfileError } =
+        await supabase
+          .from("user_financial_profile")
+          .select("currency")
+          .eq("id", user.id)
+          .maybeSingle();
+
       const { data: loanRows, error: loansError } = await supabase
         .from("loans")
-        .select("id, loan_name")
+        .select("id, loan_name, balance, min_payment")
         .eq("user_id", user.id)
         .order("created_at", { ascending: true });
       console.log("homepage:extracted username", profile?.username);
@@ -72,7 +83,19 @@ export default function Homepage() {
       }
 
       setUsername(profile?.username?.trim() || "Member");
-      setLoans((loanRows ?? []) as Loan[]);
+      const currencyRaw =
+        !financialProfileError && financialProfile?.currency != null
+          ? String(financialProfile.currency).trim()
+          : "";
+      setUserCurrency(currencyRaw || "USD");
+      setLoans(
+        (loanRows ?? []).map((row) => ({
+          id: row.id,
+          loan_name: row.loan_name,
+          balance: Number(row.balance),
+          min_payment: Number(row.min_payment),
+        })) as Loan[],
+      );
       console.log("homepage:final loans before render", loanRows ?? []);
       setAuthResolved(true);
     };
@@ -172,6 +195,7 @@ export default function Homepage() {
                   </button>
                   <button
                     className="flex items-center rounded-[1rem] px-4 py-3 text-left text-sm font-medium text-[color:var(--foreground)] transition hover:bg-[color:var(--accent-soft)]/50"
+                    onClick={() => router.push("/profile")}
                     type="button"
                   >
                     Profile
@@ -186,6 +210,7 @@ export default function Homepage() {
               <div className="sticky top-0 z-10 -mx-2 -mt-2 mb-6 flex justify-center px-2 pt-2">
                 <button
                   className="inline-flex items-center justify-center rounded-full bg-[color:var(--accent-deep)] px-6 py-3 text-sm font-medium text-white shadow-[0_16px_35px_rgba(18,59,45,0.18)] transition duration-300 hover:bg-[color:var(--accent)]"
+                  onClick={() => router.push("/add-loan")}
                   type="button"
                 >
                   Add Loan
@@ -217,6 +242,14 @@ export default function Homepage() {
                           <h3 className="mt-2 text-2xl font-semibold tracking-tight text-[color:var(--foreground)]">
                             {loan.loan_name}
                           </h3>
+                          <p className="mt-3 text-sm leading-6 text-[color:var(--muted)]">
+                            Balance{" "}
+                            {formatAmount(loan.balance, userCurrency)}
+                          </p>
+                          <p className="mt-1 text-sm leading-6 text-[color:var(--muted)]">
+                            Min. payment{" "}
+                            {formatAmount(loan.min_payment, userCurrency)}
+                          </p>
                         </div>
                       </div>
                     </article>
