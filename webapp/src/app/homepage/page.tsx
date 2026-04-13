@@ -141,6 +141,10 @@ export default function Homepage() {
     router.push("/login");
   };
 
+  const handleLoanClick = (loanId: string) => {
+    router.push(`/update-loan?loanId=${loanId}`);
+  };
+
   return (
     authResolved ? (
       <main className="relative flex h-screen overflow-hidden">
@@ -206,14 +210,21 @@ export default function Homepage() {
           </header>
 
           <section className="flex min-h-0 flex-1 flex-col pt-4">
-            <div className="min-h-0 flex-1 overflow-y-auto rounded-[2.75rem] border border-white/50 bg-white/44 p-6 shadow-[0_30px_80px_rgba(18,59,45,0.08)] backdrop-blur-sm sm:p-8 lg:p-10">
-              <div className="sticky top-0 z-10 -mx-2 -mt-2 mb-6 flex justify-center px-2 pt-2">
+            <div className="dashboard-scroll min-h-0 flex-1 overflow-y-auto rounded-[2.75rem] border border-white/50 bg-white/44 p-6 shadow-[0_30px_80px_rgba(18,59,45,0.08)] backdrop-blur-sm sm:p-8 lg:p-10">
+              <div className="-mx-2 -mt-2 mb-6 flex justify-center gap-3 px-2 pt-2">
                 <button
                   className="inline-flex items-center justify-center rounded-full bg-[color:var(--accent-deep)] px-6 py-3 text-sm font-medium text-white shadow-[0_16px_35px_rgba(18,59,45,0.18)] transition duration-300 hover:bg-[color:var(--accent)]"
                   onClick={() => router.push("/add-loan")}
                   type="button"
                 >
                   Add Loan
+                </button>
+                <button
+                  className="inline-flex items-center justify-center rounded-full bg-[color:var(--accent-deep)] px-6 py-3 text-sm font-medium text-white shadow-[0_16px_35px_rgba(18,59,45,0.18)] transition duration-300 hover:bg-[color:var(--accent)]"
+                  onClick={() => router.push("/dashboard")}
+                  type="button"
+                >
+                  Dashboard
                 </button>
               </div>
 
@@ -233,6 +244,15 @@ export default function Homepage() {
                     <article
                       className="rounded-[2rem] border border-[color:var(--line)] bg-[color:var(--surface)] p-5 shadow-[0_18px_60px_rgba(18,59,45,0.05)] transition duration-300 hover:border-[color:var(--accent)]/40 hover:bg-white/82 sm:p-6"
                       key={loan.id}
+                      onClick={() => handleLoanClick(loan.id)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          handleLoanClick(loan.id);
+                        }
+                      }}
+                      role="button"
+                      tabIndex={0}
                     >
                       <div>
                         <div>
@@ -259,6 +279,27 @@ export default function Homepage() {
             </div>
           </section>
         </div>
+        <style jsx global>{`
+          .dashboard-scroll {
+            scrollbar-color: rgba(91, 109, 99, 0.42) transparent;
+            scrollbar-width: thin;
+          }
+
+          .dashboard-scroll::-webkit-scrollbar {
+            width: 10px;
+          }
+
+          .dashboard-scroll::-webkit-scrollbar-track {
+            background: transparent;
+          }
+
+          .dashboard-scroll::-webkit-scrollbar-thumb {
+            background: rgba(91, 109, 99, 0.42);
+            border-radius: 9999px;
+            border: 2px solid transparent;
+            background-clip: padding-box;
+          }
+        `}</style>
       </main>
     ) : null
   );

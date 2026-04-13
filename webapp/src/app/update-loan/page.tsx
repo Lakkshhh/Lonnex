@@ -1,17 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ChangeEvent,
   FormEvent,
+  Suspense,
   useEffect,
   useMemo,
   useState,
 } from "react";
 
-import { supabase } from "@/lib/supabase";
 import { CURRENCIES } from "@/lib/currency";
+import { supabase } from "@/lib/supabase";
 
 const CURRENCY_SELECT_OPTIONS = (
   Object.entries(CURRENCIES) as [keyof typeof CURRENCIES, string][]
@@ -32,7 +33,7 @@ type LoanType =
   | "debt_consolidation_loan"
   | "other";
 
-type AddLoanValues = {
+type LoanValues = {
   loan_name: string;
   loan_type: LoanType;
   servicer: string;
@@ -43,11 +44,11 @@ type AddLoanValues = {
   extra_budget: string;
 };
 
-type FieldName = keyof AddLoanValues;
+type FieldName = keyof LoanValues;
 
 type FieldErrors = Partial<Record<FieldName | "form", string>>;
 
-const INITIAL_VALUES: AddLoanValues = {
+const INITIAL_VALUES: LoanValues = {
   loan_name: "",
   loan_type: "education_student_loan",
   servicer: "",
@@ -118,7 +119,7 @@ type ValidateOptions = {
 };
 
 function validateValues(
-  values: AddLoanValues,
+  values: LoanValues,
   options?: ValidateOptions,
 ): FieldErrors {
   const errors: FieldErrors = {};
@@ -200,43 +201,18 @@ function validateValues(
   return errors;
 }
 
-function getFieldFromApiError(message: string): keyof FieldErrors {
-  if (
-    message.startsWith("Minimum payment of $") ||
-    message.startsWith("min_payment")
-  ) {
-    return "min_payment";
-  }
-  if (message.startsWith("loan_name")) {
-    return "loan_name";
-  }
-  if (message.startsWith("balance")) {
-    return "balance";
-  }
-  if (message.startsWith("interest_rate")) {
-    return "interest_rate";
-  }
-  if (message.startsWith("loan_type")) {
-    return "loan_type";
-  }
-  if (message.startsWith("monthly_income")) {
-    return "monthly_income";
-  }
-  if (message.startsWith("extra_budget")) {
-    return "extra_budget";
-  }
-  return "form";
-}
-
 type CachedFinancialProfile = {
   monthly_income: number;
   extra_budget: number;
   currency: string;
 };
 
-export default function AddLoanPage() {
+function UpdateLoanPageContent() {
   const router = useRouter();
-  const [values, setValues] = useState<AddLoanValues>(INITIAL_VALUES);
+  const searchParams = useSearchParams();
+  const loanId = searchParams.get("loanId");
+
+  const [values, setValues] = useState<LoanValues>(INITIAL_VALUES);
   const [touched, setTouched] = useState<Partial<Record<FieldName, boolean>>>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -245,6 +221,7 @@ export default function AddLoanPage() {
   const [cachedFinancialProfile, setCachedFinancialProfile] =
     useState<CachedFinancialProfile | null>(null);
   const [currencyCode, setCurrencyCode] = useState<string>("USD");
+  const [successMessage, setSuccessMessage] = useState("");
   const currencySymbol = CURRENCIES[currencyCode] ?? CURRENCIES.USD;
 
   const omitIncomeBudget = cachedFinancialProfile !== null;
@@ -267,34 +244,78 @@ export default function AddLoanPage() {
         return;
       }
 
-      const { data, error } = await supabase
-        .from("user_financial_profile")
-        .select("monthly_income, extra_budget, currency")
-        .eq("id", user.id)
-        .maybeSingle();
+      if (!loanId) {
+        if (!cancelled) {
+          setApiErrors({
+            form: "Could not load this loan.",
+          });
+          setFinancialProfileLoading(false);
+        }
+        return;
+      }
+
+      const [profileResponse, loanResponse] = await Promise.all([
+        supabase
+          .from("user_financial_profile")
+          .select("monthly_income, extra_budget, currency")
+          .eq("id", user.id)
+          .maybeSingle(),
+        supabase
+          .from("loans")
+          .select(
+            "loan_name, loan_type, servicer, balance, interest_rate, min_payment"
+          )
+          .eq("id", loanId)
+          .eq("user_id", user.id)
+          .single(),
+      ]);
 
       if (cancelled) {
         return;
       }
 
-      if (!error && data) {
+      if (!profileResponse.error && profileResponse.data) {
         setCachedFinancialProfile({
-          monthly_income: Number(data.monthly_income),
-          extra_budget: Number(data.extra_budget),
-          currency: String(data.currency || "USD"),
+          monthly_income: Number(profileResponse.data.monthly_income),
+          extra_budget: Number(profileResponse.data.extra_budget),
+          currency: String(profileResponse.data.currency || "USD"),
         });
-        setCurrencyCode(String(data.currency || "USD"));
+        setCurrencyCode(String(profileResponse.data.currency || "USD"));
       } else {
         setCachedFinancialProfile(null);
       }
 
+      if (loanResponse.error || !loanResponse.data) {
+        setApiErrors({
+          form: "Could not load this loan.",
+        });
+        setFinancialProfileLoading(false);
+        return;
+      }
+
+      setValues({
+        loan_name: String(loanResponse.data.loan_name || ""),
+        loan_type: loanResponse.data.loan_type as LoanType,
+        servicer: String(loanResponse.data.servicer || ""),
+        balance: String(loanResponse.data.balance ?? ""),
+        interest_rate: String(loanResponse.data.interest_rate ?? ""),
+        min_payment: String(loanResponse.data.min_payment ?? ""),
+        monthly_income:
+          profileResponse.data?.monthly_income != null
+            ? String(profileResponse.data.monthly_income)
+            : "",
+        extra_budget:
+          profileResponse.data?.extra_budget != null
+            ? String(profileResponse.data.extra_budget)
+            : "",
+      });
       setFinancialProfileLoading(false);
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [router]);
+  }, [loanId, router]);
 
   const inlineErrors = useMemo(
     () => validateValues(values, { omitIncomeBudget }),
@@ -336,6 +357,7 @@ export default function AddLoanPage() {
         ...current,
         [field]: true,
       }));
+      setSuccessMessage("");
       setApiErrors((current) => ({
         ...current,
         [field]: undefined,
@@ -355,84 +377,73 @@ export default function AddLoanPage() {
       return;
     }
 
+    if (!loanId) {
+      setApiErrors({
+        form: "Could not load this loan.",
+      });
+      return;
+    }
+
     setSubmitting(true);
+    setSuccessMessage("");
 
     try {
       const {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser();
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
 
-      if (userError || !user || !session?.access_token) {
+      if (userError || !user) {
         router.push("/login");
         return;
       }
 
-      const {
-        data: profile,
-        error: profileError,
-      } = await supabase
-        .from("profiles")
-        .select("username")
-        .eq("id", user.id)
-        .single();
-
-      if (profileError || !profile?.username?.trim()) {
-        setApiErrors({
-          form:
-            "Could not load your profile username. Check that your profile exists and try again.",
-        });
-        return;
-      }
-
-      const baseBody = {
-        ...values,
-        currency: currencyCode,
-        user_id: user.id,
-        username: profile.username.trim(),
-      };
-      const bodyPayload =
+      const nextMonthlyIncome =
         cachedFinancialProfile !== null
-          ? {
-              ...baseBody,
-              monthly_income: String(cachedFinancialProfile.monthly_income),
-              extra_budget: String(cachedFinancialProfile.extra_budget),
-            }
-          : {
-              ...baseBody,
-              currency: currencyCode,
-            };
+          ? cachedFinancialProfile.monthly_income
+          : Number(values.monthly_income);
+      const nextExtraBudget =
+        cachedFinancialProfile !== null
+          ? cachedFinancialProfile.extra_budget
+          : Number(values.extra_budget);
 
-      const response = await fetch("http://localhost:8000/loans/add", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(bodyPayload),
-      });
+      const [profileUpdate, loanUpdate] = await Promise.all([
+        supabase.from("user_financial_profile").upsert({
+          id: user.id,
+          monthly_income: nextMonthlyIncome,
+          extra_budget: nextExtraBudget,
+          currency: currencyCode,
+        }),
+        supabase
+          .from("loans")
+          .update({
+            loan_name: values.loan_name.trim(),
+            loan_type: values.loan_type,
+            servicer: values.servicer.trim(),
+            balance: Number(values.balance),
+            interest_rate: normalizeInterestRate(Number(values.interest_rate)),
+            min_payment: Number(values.min_payment),
+          })
+          .eq("id", loanId)
+          .eq("user_id", user.id),
+      ]);
 
-      if (!response.ok) {
-        const result = (await response.json()) as {
-          detail?: string;
-          error?: string;
-        };
-        const message =
-          result.detail || result.error || "Unable to save this loan right now.";
-        const field = getFieldFromApiError(message);
-
+      if (profileUpdate.error || loanUpdate.error) {
         setApiErrors({
-          [field]: message,
+          form: "Unable to update this loan right now.",
         });
         return;
       }
 
+      setCachedFinancialProfile({
+        monthly_income: nextMonthlyIncome,
+        extra_budget: nextExtraBudget,
+        currency: currencyCode,
+      });
+      setSuccessMessage("Loan information updated!");
     } catch {
       setApiErrors({
-        form: "Unable to save this loan right now.",
+        form: "Unable to update this loan right now.",
       });
     } finally {
       setSubmitting(false);
@@ -477,7 +488,10 @@ export default function AddLoanPage() {
                     <select
                       className={inputClass}
                       id="currency"
-                      onChange={(event) => setCurrencyCode(event.target.value)}
+                      onChange={(event) => {
+                        setCurrencyCode(event.target.value);
+                        setSuccessMessage("");
+                      }}
                       value={currencyCode}
                     >
                       {CURRENCY_SELECT_OPTIONS.map(({ code, label }) => (
@@ -494,11 +508,11 @@ export default function AddLoanPage() {
                   }
                 >
                   <label
-                      className="text-sm font-medium text-[color:var(--foreground)]"
-                      htmlFor="loan_name"
-                    >
-                      {FIELD_LABELS.loan_name}
-                    </label>
+                    className="text-sm font-medium text-[color:var(--foreground)]"
+                    htmlFor="loan_name"
+                  >
+                    {FIELD_LABELS.loan_name}
+                  </label>
                   <input
                     className={inputClass}
                     id="loan_name"
@@ -514,159 +528,159 @@ export default function AddLoanPage() {
               </div>
 
               <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                  <div>
-                    <label
-                      className="text-sm font-medium text-[color:var(--foreground)]"
-                      htmlFor="loan_type"
-                    >
-                      {FIELD_LABELS.loan_type}
-                    </label>
-                    <select
-                      className={inputClass}
-                      id="loan_type"
-                      onChange={handleFieldChange("loan_type")}
-                      value={values.loan_type}
-                    >
-                      {LOAN_TYPE_OPTIONS.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    {visibleErrors.loan_type ? (
-                      <p className={errorClass}>{visibleErrors.loan_type}</p>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <label
-                      className="text-sm font-medium text-[color:var(--foreground)]"
-                      htmlFor="servicer"
-                    >
-                      {FIELD_LABELS.servicer}
-                    </label>
-                    <input
-                      className={inputClass}
-                      id="servicer"
-                      onChange={handleFieldChange("servicer")}
-                      placeholder="Optional"
-                      type="text"
-                      value={values.servicer}
-                    />
-                  </div>
-
-                  <div>
-                    <label
-                      className="text-sm font-medium text-[color:var(--foreground)]"
-                      htmlFor="balance"
-                    >
-                      {`Balance (${currencySymbol})`}
-                    </label>
-                    <input
-                      className={inputClass}
-                      id="balance"
-                      inputMode="decimal"
-                      onChange={handleFieldChange("balance")}
-                      placeholder={`${currencySymbol}12500`}
-                      type="text"
-                      value={values.balance}
-                    />
-                    {visibleErrors.balance ? (
-                      <p className={errorClass}>{visibleErrors.balance}</p>
-                    ) : null}
-                  </div>
-
-                  <div>
-                    <label
-                      className="text-sm font-medium text-[color:var(--foreground)]"
-                      htmlFor="interest_rate"
-                    >
-                      {FIELD_LABELS.interest_rate}
-                    </label>
-                    <input
-                      className={inputClass}
-                      id="interest_rate"
-                      inputMode="decimal"
-                      onChange={handleFieldChange("interest_rate")}
-                      placeholder="6.5"
-                      type="text"
-                      value={values.interest_rate}
-                    />
-                    {visibleErrors.interest_rate ? (
-                      <p className={errorClass}>{visibleErrors.interest_rate}</p>
-                    ) : null}
-                  </div>
-
-                  <div className="sm:col-span-2">
-                    <label
-                      className="text-sm font-medium text-[color:var(--foreground)]"
-                      htmlFor="min_payment"
-                    >
-                      {`Minimum monthly payment (${currencySymbol})`}
-                    </label>
-                    <input
-                      className={inputClass}
-                      id="min_payment"
-                      inputMode="decimal"
-                      onChange={handleFieldChange("min_payment")}
-                      placeholder={`${currencySymbol}150`}
-                      type="text"
-                      value={values.min_payment}
-                    />
-                    {visibleErrors.min_payment ? (
-                      <p className={errorClass}>{visibleErrors.min_payment}</p>
-                    ) : null}
-                  </div>
-
-                  {!omitIncomeBudget ? (
-                    <>
-                      <div>
-                        <label
-                          className="text-sm font-medium text-[color:var(--foreground)]"
-                          htmlFor="monthly_income"
-                        >
-                          {`Monthly take-home income (${currencySymbol})`}
-                        </label>
-                        <input
-                          className={inputClass}
-                          id="monthly_income"
-                          inputMode="decimal"
-                          onChange={handleFieldChange("monthly_income")}
-                          placeholder={`${currencySymbol}4200`}
-                          type="text"
-                          value={values.monthly_income}
-                        />
-                        {visibleErrors.monthly_income ? (
-                          <p className={errorClass}>
-                            {visibleErrors.monthly_income}
-                          </p>
-                        ) : null}
-                      </div>
-
-                      <div>
-                        <label
-                          className="text-sm font-medium text-[color:var(--foreground)]"
-                          htmlFor="extra_budget"
-                        >
-                          {`Extra payment budget (${currencySymbol}/mo)`}
-                        </label>
-                        <input
-                          className={inputClass}
-                          id="extra_budget"
-                          inputMode="decimal"
-                          onChange={handleFieldChange("extra_budget")}
-                          placeholder={`${currencySymbol}100`}
-                          type="text"
-                          value={values.extra_budget}
-                        />
-                        {visibleErrors.extra_budget ? (
-                          <p className={errorClass}>
-                            {visibleErrors.extra_budget}
-                          </p>
-                        ) : null}
-                      </div>
-                    </>
+                <div>
+                  <label
+                    className="text-sm font-medium text-[color:var(--foreground)]"
+                    htmlFor="loan_type"
+                  >
+                    {FIELD_LABELS.loan_type}
+                  </label>
+                  <select
+                    className={inputClass}
+                    id="loan_type"
+                    onChange={handleFieldChange("loan_type")}
+                    value={values.loan_type}
+                  >
+                    {LOAN_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </select>
+                  {visibleErrors.loan_type ? (
+                    <p className={errorClass}>{visibleErrors.loan_type}</p>
                   ) : null}
+                </div>
+
+                <div>
+                  <label
+                    className="text-sm font-medium text-[color:var(--foreground)]"
+                    htmlFor="servicer"
+                  >
+                    {FIELD_LABELS.servicer}
+                  </label>
+                  <input
+                    className={inputClass}
+                    id="servicer"
+                    onChange={handleFieldChange("servicer")}
+                    placeholder="Optional"
+                    type="text"
+                    value={values.servicer}
+                  />
+                </div>
+
+                <div>
+                  <label
+                    className="text-sm font-medium text-[color:var(--foreground)]"
+                    htmlFor="balance"
+                  >
+                    {`Balance (${currencySymbol})`}
+                  </label>
+                  <input
+                    className={inputClass}
+                    id="balance"
+                    inputMode="decimal"
+                    onChange={handleFieldChange("balance")}
+                    placeholder={`${currencySymbol}12500`}
+                    type="text"
+                    value={values.balance}
+                  />
+                  {visibleErrors.balance ? (
+                    <p className={errorClass}>{visibleErrors.balance}</p>
+                  ) : null}
+                </div>
+
+                <div>
+                  <label
+                    className="text-sm font-medium text-[color:var(--foreground)]"
+                    htmlFor="interest_rate"
+                  >
+                    {FIELD_LABELS.interest_rate}
+                  </label>
+                  <input
+                    className={inputClass}
+                    id="interest_rate"
+                    inputMode="decimal"
+                    onChange={handleFieldChange("interest_rate")}
+                    placeholder="6.5"
+                    type="text"
+                    value={values.interest_rate}
+                  />
+                  {visibleErrors.interest_rate ? (
+                    <p className={errorClass}>{visibleErrors.interest_rate}</p>
+                  ) : null}
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label
+                    className="text-sm font-medium text-[color:var(--foreground)]"
+                    htmlFor="min_payment"
+                  >
+                    {`Minimum monthly payment (${currencySymbol})`}
+                  </label>
+                  <input
+                    className={inputClass}
+                    id="min_payment"
+                    inputMode="decimal"
+                    onChange={handleFieldChange("min_payment")}
+                    placeholder={`${currencySymbol}150`}
+                    type="text"
+                    value={values.min_payment}
+                  />
+                  {visibleErrors.min_payment ? (
+                    <p className={errorClass}>{visibleErrors.min_payment}</p>
+                  ) : null}
+                </div>
+
+                {!omitIncomeBudget ? (
+                  <>
+                    <div>
+                      <label
+                        className="text-sm font-medium text-[color:var(--foreground)]"
+                        htmlFor="monthly_income"
+                      >
+                        {`Monthly take-home income (${currencySymbol})`}
+                      </label>
+                      <input
+                        className={inputClass}
+                        id="monthly_income"
+                        inputMode="decimal"
+                        onChange={handleFieldChange("monthly_income")}
+                        placeholder={`${currencySymbol}4200`}
+                        type="text"
+                        value={values.monthly_income}
+                      />
+                      {visibleErrors.monthly_income ? (
+                        <p className={errorClass}>
+                          {visibleErrors.monthly_income}
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <div>
+                      <label
+                        className="text-sm font-medium text-[color:var(--foreground)]"
+                        htmlFor="extra_budget"
+                      >
+                        {`Extra payment budget (${currencySymbol}/mo)`}
+                      </label>
+                      <input
+                        className={inputClass}
+                        id="extra_budget"
+                        inputMode="decimal"
+                        onChange={handleFieldChange("extra_budget")}
+                        placeholder={`${currencySymbol}100`}
+                        type="text"
+                        value={values.extra_budget}
+                      />
+                      {visibleErrors.extra_budget ? (
+                        <p className={errorClass}>
+                          {visibleErrors.extra_budget}
+                        </p>
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
               </div>
 
               {visibleErrors.form ? (
@@ -678,18 +692,33 @@ export default function AddLoanPage() {
                   Lonnex will use this to validate the loan and start building
                   your repayment plan.
                 </p>
-                <button
-                  className="inline-flex min-w-[9rem] shrink-0 items-center justify-center self-end rounded-full bg-[color:var(--accent-deep)] px-6 py-3 text-sm font-medium text-white shadow-[0_16px_35px_rgba(18,59,45,0.18)] transition duration-300 hover:bg-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-70 sm:self-auto"
-                  disabled={financialProfileLoading || submitting}
-                  type="submit"
-                >
-                  {submitting ? "Saving..." : "Save Loan"}
-                </button>
+                <div className="flex min-w-[9rem] shrink-0 flex-col items-end self-end sm:self-auto">
+                  <button
+                    className="inline-flex min-w-[9rem] items-center justify-center rounded-full bg-[color:var(--accent-deep)] px-6 py-3 text-sm font-medium text-white shadow-[0_16px_35px_rgba(18,59,45,0.18)] transition duration-300 hover:bg-[color:var(--accent)] disabled:cursor-not-allowed disabled:opacity-70"
+                    disabled={financialProfileLoading || submitting}
+                    type="submit"
+                  >
+                    {submitting ? "Saving..." : "Save Loan"}
+                  </button>
+                  {successMessage ? (
+                    <p className="mt-3 text-sm text-[color:var(--accent)]">
+                      {successMessage}
+                    </p>
+                  ) : null}
+                </div>
               </div>
             </div>
           </form>
         </section>
       </div>
     </main>
+  );
+}
+
+export default function UpdateLoanPage() {
+  return (
+    <Suspense fallback={null}>
+      <UpdateLoanPageContent />
+    </Suspense>
   );
 }
